@@ -3,6 +3,7 @@ package blbl.cat3399.core.prefs
 import android.content.Context
 import android.provider.Settings
 import blbl.cat3399.core.api.SponsorBlockCategories
+import blbl.cat3399.core.cdn.CdnRouting
 import blbl.cat3399.core.tv.isTvDevice
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
@@ -362,6 +363,15 @@ class AppPrefs(context: Context) {
                 }
             prefs.edit().putString(KEY_PLAYER_RENDER_VIEW, normalized).apply()
         }
+
+    var playerCdnAccelerationMode: String
+        get() = CdnRouting.mode(prefs.getString("player_cdn_acceleration_mode", "auto"))
+        set(value) = prefs.edit().putString("player_cdn_acceleration_mode", CdnRouting.mode(value)).apply()
+
+    var playerCdnManualHost: String
+        get() = prefs.getString("player_cdn_manual_host", CdnRouting.mirrors.first())
+            ?.takeIf { it in CdnRouting.mirrors } ?: CdnRouting.mirrors.first()
+        set(value) = prefs.edit().putString("player_cdn_manual_host", value.takeIf { it in CdnRouting.mirrors } ?: CdnRouting.mirrors.first()).apply()
 
     var playerEngineKind: String
         get() {

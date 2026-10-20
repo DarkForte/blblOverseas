@@ -4,6 +4,8 @@ package blbl.cat3399.feature.player.engine
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.Surface
 import androidx.media3.common.C
@@ -39,6 +41,9 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.ParsingLoadable
 import blbl.cat3399.core.api.video.VideoMediaRequestProfile
 import blbl.cat3399.core.log.AppLog
+import blbl.cat3399.core.cdn.CdnSession
+import blbl.cat3399.core.cdn.CdnRouting
+import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.feature.player.AudioBalanceLevel
 import blbl.cat3399.feature.player.CdnFailoverDataSourceFactory
@@ -51,6 +56,7 @@ import java.io.File
 import java.io.InputStream
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArraySet
+import java.util.concurrent.TimeUnit
 import kotlin.math.roundToLong
 
 internal data class LiveHlsDebugInfo(
@@ -298,7 +304,39 @@ internal class ExoPlayerEngine(
         )
     }
 
+    private var cdnSession: CdnSession? = null
+    private val cdnHandler = Handler(Looper.getMainLooper())
+    private var cdnBufferingAt: Long? = null
+    private val cdnTick = object : Runnable {
+        override fun run() {
+            val player = exoPlayer
+            val buffering = player.playWhenReady && player.playbackState == Player.STATE_BUFFERING
+            if (buffering && cdnBufferingAt == null) cdnBufferingAt = SystemClock.elapsedRealtime()
+            if (!buffering) cdnBufferingAt = null
+            cdnSession?.update(
+                playing = player.playWhenReady && player.playbackState in listOf(Player.STATE_READY, Player.STATE_BUFFERING),
+                bufferingMs = cdnBufferingAt?.let { SystemClock.elapsedRealtime() - it } ?: 0,
+                bufferMs = (player.bufferedPosition - player.currentPosition).coerceAtLeast(0),
+                speed = player.playbackParameters.speed,
+            )
+            if (cdnSession != null) cdnHandler.postDelayed(this, 1_000)
+        }
+    }
+
+    fun cdnDiagnostics(): String = cdnSession?.diagnostics() ?: "CDN加速=关闭 / 非点播媒体"
+
     override fun setSource(source: PlaybackSource) {
+        cdnHandler.removeCallbacks(cdnTick)
+        cdnSession?.close()
+        cdnSession = null
+        cdnBufferingAt = null
+        if (source is PlaybackSource.Vod) {
+            val prefs = AppPrefs(appContext)
+            if (CdnRouting.mode(prefs.playerCdnAccelerationMode) != "off") {
+                cdnSession = CdnSession(prefs.playerCdnAccelerationMode, prefs.playerCdnManualHost, onEvent = { AppLog.i("CdnAcceleration", it) })
+                cdnHandler.post(cdnTick)
+            }
+        }
         AppLog.i(
             "QualitySwitch",
             "setSource type=${source.javaClass.simpleName} seamlessRequested=${(source as? PlaybackSource.Vod)?.seamlessQualitySwitchEnabled == true} " +
@@ -390,6 +428,9 @@ internal class ExoPlayerEngine(
     }
 
     override fun release() {
+        cdnHandler.removeCallbacks(cdnTick)
+        cdnSession?.close()
+        cdnSession = null
         exoPlayer.release()
     }
 
@@ -409,6 +450,7 @@ internal class ExoPlayerEngine(
         kind: DebugStreamKind,
         urlCandidates: List<String>? = null,
         mediaRequestProfile: VideoMediaRequestProfile = VideoMediaRequestProfile.WEB,
+        bandwidth: Long = 0,
     ): DataSource.Factory {
         val listener =
             object : TransferListener {
@@ -433,7 +475,14 @@ internal class ExoPlayerEngine(
                 VideoMediaRequestProfile.WEB -> okHttpClient
                 VideoMediaRequestProfile.APP -> BiliClient.appCdnOkHttp
             }
-        val upstream = OkHttpDataSource.Factory(client).setTransferListener(listener)
+        val route = cdnSession?.register(urlCandidates.orEmpty(), bandwidth, kind.name, client)
+        val mediaClient = if (route != null) {
+            client.newBuilder().readTimeout(5, TimeUnit.SECONDS).connectTimeout(5, TimeUnit.SECONDS).build()
+        } else client
+        val upstream = OkHttpDataSource.Factory(mediaClient).setTransferListener(listener)
+        if (route != null) return AcceleratedCdnDataSourceFactory(
+            upstream, route, passthrough = OkHttpDataSource.Factory(client).setTransferListener(listener),
+        )
         val uris =
             urlCandidates
                 .orEmpty()
@@ -494,6 +543,7 @@ internal class ExoPlayerEngine(
                     kind = DebugStreamKind.VIDEO,
                     urlCandidates = video.videoUrlCandidates,
                     mediaRequestProfile = video.videoMediaRequestProfile,
+                    bandwidth = video.videoTrackInfo.bandwidth ?: 0,
                 )
         }
         routeFactories[dash.audioUrl] =
@@ -501,6 +551,7 @@ internal class ExoPlayerEngine(
                 kind = DebugStreamKind.AUDIO,
                 urlCandidates = dash.audioUrlCandidates,
                 mediaRequestProfile = dash.audioMediaRequestProfile,
+                bandwidth = dash.audioTrackInfo.bandwidth ?: 0,
             )
 
         val routedHttpFactory =
@@ -624,12 +675,14 @@ internal class ExoPlayerEngine(
                         DebugStreamKind.VIDEO,
                         urlCandidates = playable.videoUrlCandidates,
                         mediaRequestProfile = playable.videoMediaRequestProfile,
+                        bandwidth = playable.videoTrackInfo.bandwidth ?: 0,
                     )
                 val audioFactory =
                     createCdnFactory(
                         DebugStreamKind.AUDIO,
                         urlCandidates = playable.audioUrlCandidates,
                         mediaRequestProfile = playable.audioMediaRequestProfile,
+                        bandwidth = playable.audioTrackInfo.bandwidth ?: 0,
                     )
                 setMediaSource(
                     mediaSource = buildMerged(videoFactory, audioFactory, playable.videoUrl, playable.audioUrl, subtitle),

@@ -28,6 +28,7 @@ import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.log.LogExporter
 import blbl.cat3399.core.log.LogUploadClient
 import blbl.cat3399.core.net.BiliClient
+import blbl.cat3399.core.cdn.CdnRouting
 import blbl.cat3399.core.prefs.AppConfigBackup
 import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.prefs.CustomPageConfig
@@ -1406,6 +1407,23 @@ class SettingsInteractionHandler(
                             "TextureView" -> blbl.cat3399.core.prefs.AppPrefs.PLAYER_RENDER_VIEW_TEXTURE_VIEW
                             else -> blbl.cat3399.core.prefs.AppPrefs.PLAYER_RENDER_VIEW_SURFACE_VIEW
                         }
+                    renderer.refreshSection(entry.id)
+                }
+            }
+
+            SettingId.PlayerCdnAccelerationMode -> {
+                val modes = listOf("off", "auto", "manual")
+                showChoiceDialog(title = "CDN 自动加速", items = modes.map(CdnRouting::modeLabel),
+                    current = CdnRouting.modeLabel(prefs.playerCdnAccelerationMode)) { selected ->
+                    prefs.playerCdnAccelerationMode = modes.first { CdnRouting.modeLabel(it) == selected }
+                    renderer.refreshSection(entry.id)
+                }
+            }
+
+            SettingId.PlayerCdnManualHost -> {
+                showChoiceDialog(title = "手动 CDN（需将加速模式设为手动）", items = CdnRouting.mirrors,
+                    current = prefs.playerCdnManualHost) { selected ->
+                    prefs.playerCdnManualHost = selected
                     renderer.refreshSection(entry.id)
                 }
             }
