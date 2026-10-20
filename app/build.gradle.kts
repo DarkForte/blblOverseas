@@ -29,6 +29,12 @@ android {
     }
 
     signingConfigs {
+        create("overseasTest") {
+            storeFile = rootProject.file(propOrEnv("OVERSEAS_STORE_FILE") ?: "keystore/overseas-test.p12")
+            storePassword = propOrEnv("OVERSEAS_STORE_PASSWORD")
+            keyAlias = "overseas-test"
+            keyPassword = propOrEnv("OVERSEAS_STORE_PASSWORD")
+        }
         create("release") {
             storeFile = rootProject.file("keystore/release.keystore")
             storePassword = propOrEnv("RELEASE_STORE_PASSWORD")
@@ -50,6 +56,15 @@ android {
                 "proguard-rules.pro",
             )
         }
+    }
+
+    buildTypes.create("overseasRelease") {
+        initWith(buildTypes.getByName("release"))
+        applicationIdSuffix = ".overseas"
+        versionNameSuffix = "-overseas-test"
+        isDebuggable = false
+        signingConfig = signingConfigs.getByName("overseasTest")
+        matchingFallbacks += listOf("release")
     }
 
     buildFeatures {

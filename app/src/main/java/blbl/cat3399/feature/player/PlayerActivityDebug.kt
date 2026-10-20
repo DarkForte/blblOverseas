@@ -122,6 +122,8 @@ private fun PlayerActivity.buildDebugText(exo: ExoPlayer): String {
         sb.append('\n')
     }
 
+    sb.append((player as? ExoPlayerEngine)?.cdnDiagnostics().orEmpty()).append('\n')
+
     buildDebugDisplayText()?.let { disp ->
         sb.append("disp=").append(disp)
         sb.append('\n')

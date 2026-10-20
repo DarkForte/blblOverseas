@@ -7,6 +7,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import blbl.cat3399.BuildConfig
 import blbl.cat3399.core.net.BiliClient
+import blbl.cat3399.core.cdn.CdnRouting
 import blbl.cat3399.core.ui.FocusTreeUtils
 import blbl.cat3399.core.ui.requestFocusAdapterPositionReliable
 import blbl.cat3399.databinding.ActivitySettingsBinding
@@ -460,6 +461,8 @@ class SettingsRenderer(
                         AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel).label,
                         null,
                     ),
+                    SettingEntry(SettingId.PlayerCdnAccelerationMode, "CDN 自动加速", CdnRouting.modeLabel(prefs.playerCdnAccelerationMode), "仅 ExoPlayer 点播；正常播放不测速，下次播放生效"),
+                    SettingEntry(SettingId.PlayerCdnManualHost, "手动 CDN", prefs.playerCdnManualHost, "手动模式先验证可用性，失败恢复原始线路；调试信息可查看速度与记录"),
                     SettingEntry(SettingId.PlayerCdnPreference, "CDN线路", SettingsText.cdnText(prefs.playerCdnPreference), null),
                     SettingEntry(
                         SettingId.LiveHighBitrateEnabled,
